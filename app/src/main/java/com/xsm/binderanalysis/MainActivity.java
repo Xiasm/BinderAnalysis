@@ -1,10 +1,13 @@
 package com.xsm.binderanalysis;
 
+import android.annotation.SuppressLint;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Message;
 import android.os.RemoteException;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
@@ -16,22 +19,52 @@ import android.widget.Toast;
 
 import com.xsm.server.IRemoteService;
 import com.xsm.server.entity.Book;
+import com.xsm.server.listener.IOnNewBookArrivedListener;
 
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity implements View.OnClickListener {
+    public static final int MESSAGE_NEW_BOOK_ARRIVED = 1;
 
     private ServiceConnection serviceConnection =  new ServiceConnection() {
 
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
-            mRemoteService = IRemoteService.Stub.asInterface(service);
-
+            try {
+                mRemoteService = IRemoteService.Stub.asInterface(service);
+                mRemoteService.registerListener(mBookArrivedlistener);
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
+            mRemoteService = null;
+        }
+    };
 
+    private IOnNewBookArrivedListener mBookArrivedlistener = new IOnNewBookArrivedListener.Stub() {
+
+        @Override
+        public void onNewBookArrived(Book newBook) throws RemoteException {
+            mHandler.obtainMessage(MESSAGE_NEW_BOOK_ARRIVED, newBook).sendToTarget();
+        }
+    };
+
+    @SuppressLint("HandlerLeak")
+    private Handler mHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case MESSAGE_NEW_BOOK_ARRIVED:
+                    CharSequence text = tvText.getText() + "\n" + msg.obj.toString();
+                    tvText.setText(text);
+                    break;
+                default:
+                    super.handleMessage(msg);
+                    break;
+            }
         }
     };
     private IRemoteService mRemoteService;
@@ -59,8 +92,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
+        if (mRemoteService != null && mRemoteService.asBinder().isBinderAlive()) {
+            try {
+                mRemoteService.unregisterListener(mBookArrivedlistener);
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+        }
         unbindService(serviceConnection);
+        super.onDestroy();
     }
 
 
@@ -87,7 +127,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
         } catch (RemoteException e) {
             e.printStackTrace();
         }
-
     }
 
     private void addBook() {
